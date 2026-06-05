@@ -38,7 +38,7 @@ def login_access_token(
     form_data: OAuth2PasswordRequestForm = Depends()
 ):
     user = crud.get_user_by_email(db, email=form_data.username)
-    if not user or not security.verify_password(form_data.password, user.hashed_password):
+    if not user or not security.verify_password(form_data.password, str(user.hashed_password)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect email or password"
@@ -404,7 +404,15 @@ def get_coach_dashboard(
     return {
         "teams_trained_count": teams_trained_count,
         "players_trained_count": len(players_list),
-        "players": players_list
+        "players": players_list,
+        "coached_teams": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "tournament_name": t.tournament.name,
+                "player_count": len(t.players)
+            } for t in coached_teams
+        ]
     }
 
 @api_router.get("/dashboard/sponsor")
@@ -552,6 +560,7 @@ def seed_database(db: Session = Depends(deps.get_db)):
 
     # 6. Create some sample Users for easier play
     # Players
+    players_db = []
     players_data = [
         ("player1@sports.com", "Virat Kohli"),
         ("player2@sports.com", "Rohit Sharma"),
@@ -569,6 +578,9 @@ def seed_database(db: Session = Depends(deps.get_db)):
                 is_approved=True
             )
             db.add(p)
+            db.commit()
+            db.refresh(p)
+        players_db.append(p)
             
     # Coach
     coach = db.query(User).filter(User.role == "coach").first()
@@ -581,6 +593,8 @@ def seed_database(db: Session = Depends(deps.get_db)):
             is_approved=True
         )
         db.add(coach)
+        db.commit()
+        db.refresh(coach)
         
     # Sponsor
     sponsor = db.query(User).filter(User.role == "sponsor").first()
@@ -605,7 +619,139 @@ def seed_database(db: Session = Depends(deps.get_db)):
             is_approved=True
         )
         db.add(scorer)
-        
+        db.commit()
+        db.refresh(scorer)
+
+    # Seed Tournament
+    tourney = db.query(Tournament).filter(Tournament.name == "SCA Premier Cup").first()
+    if not tourney:
+        tourney = Tournament(
+            name="SCA Premier Cup",
+            federation_id=fed.id,
+            fee=100.0,
+            number_of_entry=8,
+            maximum_player_count=11,
+            team_limits=15,
+            is_approved=True,
+            status="active"
+        )
+        db.add(tourney)
+        db.commit()
+        db.refresh(tourney)
+
+    # Seed Teams
+    team_a = db.query(Team).filter(Team.name == "Royal Challengers").first()
+    if not team_a:
+        team_a = Team(
+            name="Royal Challengers",
+            tournament_id=tourney.id,
+            coach_id=coach.id,
+            created_by_id=players_db[0].id
+        )
+        db.add(team_a)
+        db.commit()
+        db.refresh(team_a)
+
+    team_b = db.query(Team).filter(Team.name == "Chennai Super Kings").first()
+    if not team_b:
+        team_b = Team(
+            name="Chennai Super Kings",
+            tournament_id=tourney.id,
+            coach_id=coach.id,
+            created_by_id=players_db[2].id
+        )
+        db.add(team_b)
+        db.commit()
+        db.refresh(team_b)
+
+    # Add players to Team Players
+    for p in players_db[:2]:
+        tp = db.query(TeamPlayer).filter(TeamPlayer.team_id == team_a.id, TeamPlayer.player_id == p.id).first()
+        if not tp:
+            tp = TeamPlayer(
+                team_id=team_a.id,
+                player_id=p.id,
+                runs_scored=340 if p.email == "player1@sports.com" else 280,
+                balls_faced=220 if p.email == "player1@sports.com" else 210,
+                wickets_taken=0,
+                runs_conceded=0,
+                performance_score=150.0 if p.email == "player1@sports.com" else 133.0
+            )
+            db.add(tp)
+
+    for p in players_db[2:]:
+        tp = db.query(TeamPlayer).filter(TeamPlayer.team_id == team_b.id, TeamPlayer.player_id == p.id).first()
+        if not tp:
+            tp = TeamPlayer(
+                team_id=team_b.id,
+                player_id=p.id,
+                runs_scored=50 if p.email == "player3@sports.com" else 310,
+                balls_faced=40 if p.email == "player3@sports.com" else 240,
+                wickets_taken=18 if p.email == "player3@sports.com" else 0,
+                runs_conceded=180 if p.email == "player3@sports.com" else 0,
+                performance_score=145.0 if p.email == "player3@sports.com" else 129.0
+            )
+            db.add(tp)
+
+    # Seed Matches
+    match_live = db.query(Match).filter(Match.tournament_id == tourney.id, Match.status == "live").first()
+    if not match_live:
+        match_live = Match(
+            tournament_id=tourney.id,
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            scorer_id=scorer.id,
+            status="live",
+            team_a_runs=142,
+            team_a_wickets=3,
+            team_a_overs=18.2,
+            team_b_runs=0,
+            team_b_wickets=0,
+            team_b_overs=0.0
+        )
+        db.add(match_live)
+
+    match_completed = db.query(Match).filter(Match.tournament_id == tourney.id, Match.status == "completed").first()
+    if not match_completed:
+        match_completed = Match(
+            tournament_id=tourney.id,
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            scorer_id=scorer.id,
+            status="completed",
+            team_a_runs=120,
+            team_a_wickets=10,
+            team_a_overs=20.0,
+            team_b_runs=121,
+            team_b_wickets=4,
+            team_b_overs=18.5,
+            winner_id=team_b.id
+        )
+        db.add(match_completed)
+
+    # Seed Notification Logs (Emails)
+    from app.models.notification import NotificationLog
+    log_count = db.query(NotificationLog).count()
+    if log_count == 0:
+        logs = [
+            NotificationLog(
+                recipient_email="player1@sports.com",
+                subject="Team Registration Invitation",
+                body="Hi Virat Kohli, you have been invited to join the team 'Royal Challengers' for the 'SCA Premier Cup' by Rohit Sharma."
+            ),
+            NotificationLog(
+                recipient_email="coach@sports.com",
+                subject="New Team Assignment",
+                body="Hi Rahul Dravid, you have been assigned as the Coach for the team 'Royal Challengers' and 'Chennai Super Kings' in the 'SCA Premier Cup'."
+            ),
+            NotificationLog(
+                recipient_email="scorer@sports.com",
+                subject="Match Scoring Duty",
+                body="Hi Official Scorer Umpire, you have been assigned to score the match 'Royal Challengers' vs 'Chennai Super Kings' in the 'SCA Premier Cup'."
+            )
+        ]
+        db.bulk_save_objects(logs)
+
     db.commit()
 
-    return {"status": "success", "message": "Database seeded with Super Admin, Department, Federation, and demo role accounts (password123 for all)."}
+    return {"status": "success", "message": "Database seeded with complete set of Tournaments, Teams, Live Matches, and Mailbox Logs (password123 for all)."}
