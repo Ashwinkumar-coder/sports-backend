@@ -16,11 +16,11 @@ def seed():
     db = SessionLocal()
     try:
         print("Checking for Super Admin...")
-        super_admin = db.query(User).filter(User.role == "super_admin").first()
+        super_admin = db.query(User).filter(User.email == "superadmin@gmail.com").first()
         if not super_admin:
             super_admin = User(
-                email="superadmin@sports.com",
-                hashed_password=security.get_password_hash("password123"),
+                email="superadmin@gmail.com",
+                hashed_password=security.get_password_hash("1234"),
                 full_name="Platform Super Admin",
                 role="super_admin",
                 is_approved=True
@@ -28,7 +28,7 @@ def seed():
             db.add(super_admin)
             db.commit()
             db.refresh(super_admin)
-            print("Super Admin created: superadmin@sports.com (password123)")
+            print("Super Admin created: superadmin@gmail.com (1234)")
         else:
             print("Super Admin already exists.")
             
@@ -254,9 +254,9 @@ def seed():
                 team_b_id=team_b.id,
                 scorer_id=scorer.id,
                 status="live",
-                team_a_runs=142,
-                team_a_wickets=3,
-                team_a_overs=18.2,
+                team_a_runs=0,
+                team_a_wickets=0,
+                team_a_overs=0.0,
                 team_b_runs=0,
                 team_b_wickets=0,
                 team_b_overs=0.0

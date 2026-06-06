@@ -7,6 +7,7 @@ from .team import Team, TeamPlayer
 from .match import Match
 from .sponsorship import Sponsorship
 from .notification import NotificationLog
+from .scorer_application import ScorerApplication
 
 __all__ = [
     "Base",
@@ -19,4 +20,5 @@ __all__ = [
     "Match",
     "Sponsorship",
     "NotificationLog",
+    "ScorerApplication",
 ]

@@ -66,11 +66,15 @@ def read_user_me(current_user: User = Depends(deps.get_current_user)):
 @api_router.get("/auth/users", response_model=List[schemas.UserOut])
 def get_users_list(
     role: Optional[str] = None,
+    all_users: Optional[bool] = False,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    """Retrieve approved users, useful for selection dropdowns (players, coaches, scorers)."""
-    query = db.query(User).filter(User.is_approved == True)
+    """Retrieve approved users (or all users if requested by admin)."""
+    if all_users and current_user.role in ["super_admin", "department_admin"]:
+        query = db.query(User)
+    else:
+        query = db.query(User).filter(User.is_approved == True)
     if role:
         query = query.filter(User.role == role)
     return query.all()
@@ -213,6 +217,25 @@ def register_team_endpoint(
     if current_teams >= tourney.number_of_entry:
         raise HTTPException(status_code=400, detail="Tournament registration is full.")
         
+    # Check if coach is already booked
+    coach_booked = db.query(Team).filter(
+        Team.tournament_id == id,
+        Team.coach_id == team_in.coach_id
+    ).first()
+    if coach_booked:
+        raise HTTPException(status_code=400, detail="Coach is already booked for this tournament.")
+
+    # Check if any player is already booked
+    for pid in team_in.player_ids:
+        player_booked = db.query(TeamPlayer).join(Team).filter(
+            Team.tournament_id == id,
+            TeamPlayer.player_id == pid
+        ).first()
+        if player_booked:
+            player_user = db.query(User).filter(User.id == pid).first()
+            pname = player_user.full_name if player_user else f"ID {pid}"
+            raise HTTPException(status_code=400, detail=f"Player '{pname}' is already booked.")
+            
     return crud.create_team(db, team_in=team_in, tournament_id=id, creator_id=current_user.id)
 
 @api_router.get("/tournaments/{id}/teams", response_model=List[schemas.TeamOut])
@@ -465,6 +488,178 @@ def get_scorer_dashboard(
     return {
         "assigned_matches": matches_list
     }
+
+
+# ----------------------------------------------------
+# Scorer applications, Sponsorship approvals, Team approvals, and admin delete/block
+# ----------------------------------------------------
+
+@api_router.post("/tournaments/{tournament_id}/apply-scorer", response_model=schemas.ScorerApplicationOut)
+def apply_scorer_endpoint(
+    tournament_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role != "scorer":
+        raise HTTPException(status_code=403, detail="Only scorers can apply.")
+    return crud.apply_scorer(db, tournament_id=tournament_id, scorer_id=current_user.id)
+
+@api_router.get("/federation/pending-teams", response_model=List[schemas.TeamOut])
+def get_pending_teams(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["federation_admin", "super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    return db.query(Team).filter(Team.status == "pending").all()
+
+@api_router.get("/federation/pending-sponsorships", response_model=List[schemas.SponsorshipOut])
+def get_pending_sponsorships(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["federation_admin", "super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    return db.query(Sponsorship).filter(Sponsorship.status == "pending").all()
+
+@api_router.get("/federation/pending-scorers", response_model=List[schemas.ScorerApplicationOut])
+def get_pending_scorers(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["federation_admin", "super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    from .models.scorer_application import ScorerApplication
+    return db.query(ScorerApplication).filter(ScorerApplication.status == "pending").all()
+
+@api_router.post("/federation/teams/{team_id}/approve", response_model=schemas.TeamOut)
+def approve_team_endpoint(
+    team_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["federation_admin", "department_admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    approved = crud.approve_team(db, team_id=team_id)
+    if not approved:
+        raise HTTPException(status_code=404, detail="Team not found.")
+    return approved
+
+@api_router.post("/federation/sponsorships/{sponsorship_id}/approve", response_model=schemas.SponsorshipOut)
+def approve_sponsorship_endpoint(
+    sponsorship_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["federation_admin", "department_admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    approved = crud.approve_sponsorship(db, sponsorship_id=sponsorship_id)
+    if not approved:
+        raise HTTPException(status_code=404, detail="Sponsorship not found.")
+    return approved
+
+@api_router.post("/federation/scorers/{application_id}/approve", response_model=schemas.ScorerApplicationOut)
+def approve_scorer_endpoint(
+    application_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["federation_admin", "department_admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    approved = crud.approve_scorer(db, application_id=application_id)
+    if not approved:
+        raise HTTPException(status_code=404, detail="Scorer application not found.")
+    return approved
+
+# Admin deletions & blocking
+@api_router.delete("/admin/users/{user_id}")
+def delete_user_endpoint(
+    user_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    success = crud.delete_user(db, user_id=user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"status": "success"}
+
+@api_router.post("/admin/users/{user_id}/block", response_model=schemas.UserOut)
+def block_user_endpoint(
+    user_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    blocked = crud.block_user(db, user_id=user_id)
+    if not blocked:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return blocked
+
+@api_router.post("/admin/users/{user_id}/unblock", response_model=schemas.UserOut)
+def unblock_user_endpoint(
+    user_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    unblocked = crud.unblock_user(db, user_id=user_id)
+    if not unblocked:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return unblocked
+
+
+@api_router.delete("/admin/matches/{match_id}")
+def delete_match_endpoint(
+    match_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    success = crud.delete_match(db, match_id=match_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    return {"status": "success"}
+
+@api_router.delete("/admin/federations/{fed_id}")
+def delete_federation_endpoint(
+    fed_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    success = crud.delete_federation(db, federation_id=fed_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Federation not found.")
+    return {"status": "success"}
+
+@api_router.delete("/admin/tournaments/{tourney_id}")
+def delete_tournament_endpoint(
+    tourney_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role not in ["super_admin", "department_admin"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    success = crud.delete_tournament(db, tournament_id=tourney_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Tournament not found.")
+    return {"status": "success"}
+
+@api_router.get("/scorer/applications", response_model=List[schemas.ScorerApplicationOut])
+def get_scorer_applications(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    if current_user.role != "scorer":
+        raise HTTPException(status_code=403, detail="Access denied.")
+    from .models.scorer_application import ScorerApplication
+    return db.query(ScorerApplication).filter(ScorerApplication.scorer_id == current_user.id).all()
 
 
 # ----------------------------------------------------

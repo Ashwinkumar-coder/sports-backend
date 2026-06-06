@@ -80,6 +80,14 @@ def create_federation(db: Session, fed_in: schemas.FederationCreate, department_
     db.add(db_fed)
     db.commit()
     db.refresh(db_fed)
+    
+    if fed_in.admin_id:
+        user = db.query(User).filter(User.id == fed_in.admin_id).first()
+        if user:
+            user.federation_id = db_fed.id
+            db.commit()
+            db.refresh(user)
+            
     return db_fed
 
 def get_federations(db: Session) -> List[Federation]:
@@ -95,6 +103,17 @@ def create_tournament(db: Session, tourney_in: schemas.TournamentCreate, federat
         number_of_entry=tourney_in.number_of_entry,
         maximum_player_count=tourney_in.maximum_player_count,
         team_limits=tourney_in.team_limits,
+        overs=tourney_in.overs,
+        city=tourney_in.city,
+        ball_type=tourney_in.ball_type,
+        start_date=tourney_in.start_date,
+        end_date=tourney_in.end_date,
+        timing_slots=tourney_in.timing_slots,
+        ground_name=tourney_in.ground_name,
+        prize_pools=tourney_in.prize_pools,
+        free_or_paid=tourney_in.free_or_paid,
+        registration_start_date=tourney_in.registration_start_date,
+        registration_end_date=tourney_in.registration_end_date,
         is_approved=False,
         status="pending_approval"
     )
@@ -140,6 +159,16 @@ def approve_tournament(db: Session, tournament_id: int) -> Optional[Tournament]:
                 subject="Tournament Approved",
                 body=f"Your tournament '{db_tourney.name}' has been approved by the Department Admin. Registration is now open."
             )
+            
+        # Notify all players, coaches, sponsors, scorers
+        notifiable_users = db.query(User).filter(User.role.in_(["player", "coach", "sponsor", "scorer"]), User.is_approved == True).all()
+        for u in notifiable_users:
+            log_notification(
+                db,
+                recipient_email=u.email,
+                subject="New Tournament Open for Registration!",
+                body=f"Hi {u.full_name}, a new tournament '{db_tourney.name}' has been approved and is now open for registration!"
+            )
     return db_tourney
 
 
@@ -149,7 +178,8 @@ def create_team(db: Session, team_in: schemas.TeamCreate, tournament_id: int, cr
         name=team_in.name,
         tournament_id=tournament_id,
         coach_id=team_in.coach_id,
-        created_by_id=creator_id
+        created_by_id=creator_id,
+        status="pending"
     )
     db.add(db_team)
     db.commit()
@@ -170,43 +200,215 @@ def create_team(db: Session, team_in: schemas.TeamCreate, tournament_id: int, cr
     db.commit()
     db.refresh(db_team)
 
-    # Trigger notifications:
-    # 1. To the Coach
-    coach = db.query(User).filter(User.id == team_in.coach_id).first()
+    # Notify Federation Admin of new team registration request
+    tourney = db_team.tournament
+    fed_admin = tourney.federation.admin if tourney and tourney.federation else None
+    if fed_admin:
+        log_notification(
+            db,
+            recipient_email=fed_admin.email,
+            subject="New Team Registration Request Received",
+            body=f"A new team '{db_team.name}' has requested registration for the tournament '{tourney.name}'. Please log in to approve it."
+        )
+
+    # Notify Coach of new team registration requesting their service
+    coach = db_team.coach
     if coach:
         log_notification(
             db,
             recipient_email=coach.email,
-            subject="Selected as Coach for Tournament Team",
-            body=f"Hello Coach {coach.full_name},\n\nYou have been selected by {db_team.creator.full_name} to coach their team '{db_team.name}' in the tournament '{db_team.tournament.name}'."
-        )
-
-    # 2. To team players
-    for player_id in team_in.player_ids:
-        player = db.query(User).filter(User.id == player_id).first()
-        if player:
-            log_notification(
-                db,
-                recipient_email=player.email,
-                subject="You have been added to a Tournament Team",
-                body=f"Hello {player.full_name},\n\nYou have been registered for the team '{db_team.name}' in the tournament '{db_team.tournament.name}' under Coach {coach.full_name if coach else 'N/A'}."
-            )
-            
-    # 3. Notification of registration completion to Sponsor & Scorer assigned (simulated/generic)
-    # Find active sponsors for the tournament
-    sponsorships = db.query(Sponsorship).filter(Sponsorship.tournament_id == tournament_id).all()
-    for s in sponsorships:
-        log_notification(
-            db,
-            recipient_email=s.sponsor.email,
-            subject="New Team Registered in Sponsored Tournament",
-            body=f"A new team '{db_team.name}' has registered for '{db_team.tournament.name}', which you sponsor."
+            subject="Assigned as Coach (Pending Approval)",
+            body=f"Hello Coach {coach.full_name},\n\n'{db_team.name}' has added you as their coach for the tournament '{tourney.name}'. This registration is currently pending federation approval."
         )
 
     return db_team
 
+def approve_team(db: Session, team_id: int) -> Optional[Team]:
+    db_team = db.query(Team).filter(Team.id == team_id).first()
+    if db_team:
+        db_team.status = "approved"
+        db.commit()
+        db.refresh(db_team)
+
+        # Notify the Coach
+        coach = db_team.coach
+        if coach:
+            log_notification(
+                db,
+                recipient_email=coach.email,
+                subject="Selected as Coach for Tournament Team (Approved)",
+                body=f"Hello Coach {coach.full_name},\n\nYour assignment to coach '{db_team.name}' in the tournament '{db_team.tournament.name}' has been approved by the Federation."
+            )
+
+        # Notify team players
+        for tp in db_team.players:
+            player = tp.player
+            if player:
+                log_notification(
+                    db,
+                    recipient_email=player.email,
+                    subject="Team Approved for Tournament",
+                    body=f"Hello {player.full_name},\n\nYour team '{db_team.name}' has been approved to participate in the tournament '{db_team.tournament.name}'."
+                )
+
+        # Notify active sponsors
+        sponsorships = db.query(Sponsorship).filter(Sponsorship.tournament_id == db_team.tournament_id, Sponsorship.status == "approved").all()
+        for s in sponsorships:
+            log_notification(
+                db,
+                recipient_email=s.sponsor.email,
+                subject="New Approved Team in Sponsored Tournament",
+                body=f"A new approved team '{db_team.name}' is participating in '{db_team.tournament.name}'."
+            )
+    return db_team
+
 def get_teams_for_tournament(db: Session, tournament_id: int) -> List[Team]:
     return db.query(Team).filter(Team.tournament_id == tournament_id).all()
+
+
+# Scorer Applications & Assignments
+from .models.scorer_application import ScorerApplication
+def apply_scorer(db: Session, tournament_id: int, scorer_id: int) -> ScorerApplication:
+    app = ScorerApplication(tournament_id=tournament_id, scorer_id=scorer_id, status="pending")
+    db.add(app)
+    db.commit()
+    db.refresh(app)
+    
+    # Notify Federation Admin of scorer application
+    tourney = db.query(Tournament).filter(Tournament.id == tournament_id).first()
+    fed_admin = tourney.federation.admin if tourney and tourney.federation else None
+    if fed_admin:
+        log_notification(
+            db,
+            recipient_email=fed_admin.email,
+            subject="New Scorer Application Received",
+            body=f"Scorer applied to score matches for tournament '{tourney.name}'. Please approve and assign them."
+        )
+    return app
+
+def approve_scorer(db: Session, application_id: int) -> Optional[ScorerApplication]:
+    app = db.query(ScorerApplication).filter(ScorerApplication.id == application_id).first()
+    if app:
+        app.status = "approved"
+        db.commit()
+        db.refresh(app)
+        
+        scorer = app.scorer
+        if scorer:
+            log_notification(
+                db,
+                recipient_email=scorer.email,
+                subject="Scorer Application Approved",
+                body=f"Hello {scorer.full_name},\n\nYour application to score matches for the tournament '{app.tournament.name}' has been approved by the Federation."
+            )
+    return app
+
+
+# sponsorship approval
+def approve_sponsorship(db: Session, sponsorship_id: int) -> Optional[Sponsorship]:
+    s = db.query(Sponsorship).filter(Sponsorship.id == sponsorship_id).first()
+    if s:
+        s.status = "approved"
+        db.commit()
+        db.refresh(s)
+        
+        sponsor = s.sponsor
+        if sponsor:
+            log_notification(
+                db,
+                recipient_email=sponsor.email,
+                subject="Sponsorship Approved",
+                body=f"Hello {sponsor.full_name},\n\nYour sponsorship of ${s.amount} for the tournament '{s.tournament.name}' has been approved by the Federation."
+            )
+    return s
+
+
+# Admin Deletions & Blocking
+def delete_user(db: Session, user_id: int) -> bool:
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        db.delete(user)
+        db.commit()
+        return True
+    return False
+
+def delete_match(db: Session, match_id: int) -> bool:
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if match:
+        db.delete(match)
+        db.commit()
+        return True
+    return False
+
+def delete_federation(db: Session, federation_id: int) -> bool:
+    fed = db.query(Federation).filter(Federation.id == federation_id).first()
+    if fed:
+        # 1. Clear federation_id from all users belonging to this federation
+        db.query(User).filter(User.federation_id == federation_id).update({User.federation_id: None})
+        db.commit()
+        
+        # 2. Recursively delete tournaments in this federation
+        tourneys = db.query(Tournament).filter(Tournament.federation_id == federation_id).all()
+        for t in tourneys:
+            delete_tournament(db, t.id)
+            
+        # 3. Delete the federation itself
+        db.delete(fed)
+        db.commit()
+        return True
+    return False
+
+def delete_tournament(db: Session, tournament_id: int) -> bool:
+    tourney = db.query(Tournament).filter(Tournament.id == tournament_id).first()
+    if tourney:
+        # Import inside function to avoid circular dependencies
+        from .models.scorer_application import ScorerApplication
+        
+        # 1. Delete Matches in this tournament
+        matches = db.query(Match).filter(Match.tournament_id == tournament_id).all()
+        for m in matches:
+            db.delete(m)
+        
+        # 2. Delete Sponsorships in this tournament
+        sponsorships = db.query(Sponsorship).filter(Sponsorship.tournament_id == tournament_id).all()
+        for s in sponsorships:
+            db.delete(s)
+        
+        # 3. Delete ScorerApplications in this tournament
+        scorer_apps = db.query(ScorerApplication).filter(ScorerApplication.tournament_id == tournament_id).all()
+        for sa in scorer_apps:
+            db.delete(sa)
+        
+        # 4. Delete TeamPlayer entries and Teams in this tournament
+        for team in list(tourney.teams):
+            for tp in list(team.players):
+                db.delete(tp)
+            db.delete(team)
+        
+        # 5. Delete the tournament itself
+        db.delete(tourney)
+        db.commit()
+        return True
+    return False
+
+
+def block_user(db: Session, user_id: int) -> Optional[User]:
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        user.is_approved = False  # De-approving blocks them from logging in
+        db.commit()
+        db.refresh(user)
+    return user
+
+def unblock_user(db: Session, user_id: int) -> Optional[User]:
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        user.is_approved = True  # Re-approving unblocks them
+        db.commit()
+        db.refresh(user)
+    return user
+
+
 
 
 # Matches

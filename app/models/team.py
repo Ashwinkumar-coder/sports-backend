@@ -10,6 +10,7 @@ class Team(Base):
     tournament_id = Column(Integer, ForeignKey("tournaments.id", ondelete="CASCADE"), nullable=False)
     coach_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String, default="pending")  # pending, approved, rejected
 
     # Relationships
     tournament = relationship("Tournament", back_populates="teams")

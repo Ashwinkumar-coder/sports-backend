@@ -13,6 +13,19 @@ class Tournament(Base):
     number_of_entry = Column(Integer, default=8)  # Maximum number of teams
     maximum_player_count = Column(Integer, default=11)  # Players per team
     team_limits = Column(Integer, default=15)  # Max squad size (e.g. including bench)
+    overs = Column(Integer, default=20)  # Number of overs per match in this tournament
+
+    # Mandatory tournament details
+    city = Column(String, nullable=True)
+    ball_type = Column(String, nullable=True)
+    start_date = Column(String, nullable=True)
+    end_date = Column(String, nullable=True)
+    timing_slots = Column(String, nullable=True)
+    ground_name = Column(String, nullable=True)
+    prize_pools = Column(String, nullable=True)
+    free_or_paid = Column(String, nullable=True)
+    registration_start_date = Column(String, nullable=True)
+    registration_end_date = Column(String, nullable=True)
     
     is_approved = Column(Boolean, default=False)
     status = Column(String, default="pending_approval")  # pending_approval, registration_open, active, completed

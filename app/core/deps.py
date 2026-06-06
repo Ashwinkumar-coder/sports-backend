@@ -41,6 +41,15 @@ def get_current_user(
     user = db.query(User).filter(User.id == int(user_id)).first()
     if not user:
         raise credentials_exception
+
+    # Auto-heal federation_id link for federation admins if not set on the user record
+    if user and user.role == "federation_admin" and not user.federation_id:
+        from ..models.federation import Federation
+        fed = db.query(Federation).filter(Federation.admin_id == user.id).first()
+        if fed:
+            user.federation_id = fed.id
+            db.commit()
+            db.refresh(user)
         
     # Check if the user is approved (required for Player, Coach, Sponsor, Scorer roles)
     # Super admins, Department admins do not need approval, or we can handle it globally.

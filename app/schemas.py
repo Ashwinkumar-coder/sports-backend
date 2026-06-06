@@ -85,17 +85,28 @@ class TeamOut(BaseModel):
     created_by_id: Optional[int] = None
     creator: Optional[UserOut] = None
     players: List[TeamPlayerOut]
+    status: str
 
     class Config:
         from_attributes = True
 
-# Tournament Schemas
 class TournamentCreate(BaseModel):
     name: str
     fee: float = 0.0
     number_of_entry: int = 8
     maximum_player_count: int = 11
     team_limits: int = 15
+    overs: int = 20
+    city: str
+    ball_type: str
+    start_date: str
+    end_date: str
+    timing_slots: str
+    ground_name: str
+    prize_pools: str
+    free_or_paid: str
+    registration_start_date: str
+    registration_end_date: str
 
 class TournamentOut(BaseModel):
     id: int
@@ -105,6 +116,17 @@ class TournamentOut(BaseModel):
     number_of_entry: int
     maximum_player_count: int
     team_limits: int
+    overs: int
+    city: Optional[str] = None
+    ball_type: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    timing_slots: Optional[str] = None
+    ground_name: Optional[str] = None
+    prize_pools: Optional[str] = None
+    free_or_paid: Optional[str] = None
+    registration_start_date: Optional[str] = None
+    registration_end_date: Optional[str] = None
     is_approved: bool
     status: str
     teams: List[TeamOut] = []
@@ -169,6 +191,7 @@ class SponsorshipOut(BaseModel):
     sponsor_id: int
     sponsor: UserOut
     amount: float
+    status: str
 
     class Config:
         from_attributes = True
@@ -183,3 +206,19 @@ class NotificationLogOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Scorer Application Schemas
+class ScorerApplicationCreate(BaseModel):
+    tournament_id: int
+
+class ScorerApplicationOut(BaseModel):
+    id: int
+    tournament_id: int
+    tournament: TournamentOut
+    scorer_id: int
+    scorer: UserOut
+    status: str
+
+    class Config:
+        from_attributes = True
+
