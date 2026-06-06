@@ -283,9 +283,21 @@ def create_match_endpoint(
         
     return crud.create_match(db, match_in=match_in, tournament_id=id)
 
+@api_router.get("/tournaments/{id}/matches", response_model=List[schemas.MatchOut])
+def list_tournament_matches(id: int, db: Session = Depends(deps.get_db)):
+    matches = db.query(Match).filter(Match.tournament_id == id).all()
+    return matches
+
 @api_router.get("/matches", response_model=List[schemas.MatchOut])
 def list_matches(db: Session = Depends(deps.get_db)):
     return crud.get_matches(db)
+
+@api_router.get("/matches/{match_id}", response_model=schemas.MatchOut)
+def get_match_by_id(match_id: int, db: Session = Depends(deps.get_db)):
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    return match
 
 @api_router.post("/matches/{match_id}/score", response_model=schemas.MatchOut)
 def update_score_endpoint(
@@ -476,14 +488,12 @@ def get_scorer_dashboard(
     
     matches_list = []
     for m in assigned_matches:
-        matches_list.append({
-            "id": m.id,
-            "tournament_name": m.tournament.name,
-            "team_a_name": m.team_a.name,
-            "team_b_name": m.team_b.name,
-            "status": m.status,
-            "score_summary": f"{m.team_a.name}: {m.team_a_runs}/{m.team_a_wickets} ({m.team_a_overs} ov) vs {m.team_b.name}: {m.team_b_runs}/{m.team_b_wickets} ({m.team_b_overs} ov)"
-        })
+        match_data = schemas.MatchOut.model_validate(m).model_dump()
+        match_data["tournament_name"] = m.tournament.name
+        match_data["team_a_name"] = m.team_a.name
+        match_data["team_b_name"] = m.team_b.name
+        match_data["score_summary"] = f"{m.team_a.name}: {m.team_a_runs}/{m.team_a_wickets} ({m.team_a_overs} ov) vs {m.team_b.name}: {m.team_b_runs}/{m.team_b_wickets} ({m.team_b_overs} ov)"
+        matches_list.append(match_data)
         
     return {
         "assigned_matches": matches_list
