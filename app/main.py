@@ -1,38 +1,46 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from .config import settings
 from .database import engine, Base
 from .api import api_router
 
-
-# Try to automatically create all PostgreSQL database tables on startup.
-# In production, migrations (e.g. Alembic) are preferred, but this is perfect for the POC.
+# Create database tables
 try:
     Base.metadata.create_all(bind=engine)
-    print("Database tables created successfully.")
+    print("✅ Database tables created successfully.")
 except Exception as e:
-    print(f"Error creating database tables (is Postgres running and DATABASE_URL correct?): {e}")
+    print(f"❌ Database initialization error: {e}")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
 
-# Set CORS origins. Allow all origins for the local POC to make it 100% accessible to web and mobile.
-origins = []
-if settings.BACKEND_CORS_ORIGINS:
-    origins = settings.BACKEND_CORS_ORIGINS
-
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if "*" in origins or not origins else origins,
-    allow_credentials=True,
+    allow_origins=[
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://187.77.189.31:7000",
+        "*"  # Remove this in production
+    ],
+    allow_credentials=False,  # Must be False when using "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Register endpoints router
+# API Routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+@app.get("/")
+def root():
+    return {
+        "message": "API is running"
+    }
 
 @app.get("/status")
 def get_status():
