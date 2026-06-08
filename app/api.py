@@ -2,7 +2,7 @@ from datetime import timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from . import crud, schemas
@@ -285,7 +285,7 @@ def create_match_endpoint(
 
 @api_router.get("/tournaments/{id}/matches", response_model=List[schemas.MatchOut])
 def list_tournament_matches(id: int, db: Session = Depends(deps.get_db)):
-    matches = db.query(Match).filter(Match.tournament_id == id).all()
+    matches = db.query(Match).options(joinedload(Match.scorer)).filter(Match.tournament_id == id).all()
     return matches
 
 @api_router.get("/matches", response_model=List[schemas.MatchOut])
@@ -294,7 +294,7 @@ def list_matches(db: Session = Depends(deps.get_db)):
 
 @api_router.get("/matches/{match_id}", response_model=schemas.MatchOut)
 def get_match_by_id(match_id: int, db: Session = Depends(deps.get_db)):
-    match = db.query(Match).filter(Match.id == match_id).first()
+    match = db.query(Match).options(joinedload(Match.scorer)).filter(Match.id == match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Match not found.")
     return match

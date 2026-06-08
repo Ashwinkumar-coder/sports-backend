@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from .models.user import User
 from .models.department import Department
 from .models.federation import Federation
@@ -436,7 +436,7 @@ def create_match(db: Session, match_in: schemas.MatchCreate, tournament_id: int)
     return db_match
 
 def get_matches(db: Session) -> List[Match]:
-    return db.query(Match).all()
+    return db.query(Match).options(joinedload(Match.scorer)).all()
 
 def update_match_score(db: Session, match_id: int, score_in: schemas.ScoreUpdate) -> Optional[Match]:
     db_match = db.query(Match).filter(Match.id == match_id).first()
