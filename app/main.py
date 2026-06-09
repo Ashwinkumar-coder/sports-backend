@@ -25,6 +25,7 @@ app.add_middleware(
         "http://127.0.0.1:5174",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:8085",
         "http://187.77.189.31:7000",
         "*"  # Remove this in production
     ],

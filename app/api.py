@@ -375,11 +375,11 @@ def get_player_dashboard(
             matches_lost += 1
             
     # Accumulate player metrics
-    total_runs = sum(tp.runs_scored for tp in team_players)
-    total_balls = sum(tp.balls_faced for tp in team_players)
-    total_wickets = sum(tp.wickets_taken for tp in team_players)
-    total_runs_conceded = sum(tp.runs_conceded for tp in team_players)
-    overall_performance = sum(tp.performance_score for tp in team_players)
+    total_runs = sum((tp.runs_scored or 0) for tp in team_players)
+    total_balls = sum((tp.balls_faced or 0) for tp in team_players)
+    total_wickets = sum((tp.wickets_taken or 0) for tp in team_players)
+    total_runs_conceded = sum((tp.runs_conceded or 0) for tp in team_players)
+    overall_performance = sum((tp.performance_score or 0) for tp in team_players)
             
     return {
         "matches_played": matches_played,
