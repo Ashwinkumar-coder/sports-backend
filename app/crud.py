@@ -453,6 +453,27 @@ def update_match_score(db: Session, match_id: int, score_in: schemas.ScoreUpdate
         db_match.team_b_wickets = score_in.wickets
         db_match.team_b_overs = score_in.overs
         
+    if score_in.wagon_wheel_data is not None:
+        db_match.wagon_wheel_data = score_in.wagon_wheel_data
+
+    # Sync live performances
+    if score_in.performances:
+        from .models.match import MatchPerformance
+        db.query(MatchPerformance).filter(MatchPerformance.match_id == match_id).delete()
+        for p in score_in.performances:
+            perf_record = MatchPerformance(
+                match_id=match_id,
+                player_id=p.player_id,
+                runs_scored=p.runs_scored,
+                balls_faced=p.balls_faced,
+                fours=p.fours,
+                sixes=p.sixes,
+                wickets_taken=p.wickets_taken,
+                runs_conceded=p.runs_conceded,
+                overs_bowled=p.overs_bowled
+            )
+            db.add(perf_record)
+
     db.commit()
     db.refresh(db_match)
     return db_match
@@ -465,7 +486,28 @@ def complete_match(db: Session, match_id: int, complete_in: schemas.MatchComplet
     db_match.status = "completed"
     db_match.winner_id = complete_in.winner_id
     
-    # Process and record player performances
+    if complete_in.wagon_wheel_data is not None:
+        db_match.wagon_wheel_data = complete_in.wagon_wheel_data
+
+    # Update MatchPerformance as final stats
+    if complete_in.performances:
+        from .models.match import MatchPerformance
+        db.query(MatchPerformance).filter(MatchPerformance.match_id == match_id).delete()
+        for p in complete_in.performances:
+            perf_record = MatchPerformance(
+                match_id=match_id,
+                player_id=p.player_id,
+                runs_scored=p.runs_scored,
+                balls_faced=p.balls_faced,
+                fours=p.fours,
+                sixes=p.sixes,
+                wickets_taken=p.wickets_taken,
+                runs_conceded=p.runs_conceded,
+                overs_bowled=p.overs_bowled
+            )
+            db.add(perf_record)
+
+    # Process and record player performances in team_players table
     for p_perf in complete_in.performances:
         # Calculate performance score based on formula:
         # Score = (Runs * 1.0) + (Wickets * 20) + (Balls Faced * 0.1) - (Runs Conceded * 0.5)
@@ -484,11 +526,14 @@ def complete_match(db: Session, match_id: int, complete_in: schemas.MatchComplet
         
         if tp:
             # Accumulate performance since players can play multiple games in a tournament
-            tp.runs_scored += p_perf.runs_scored
-            tp.balls_faced += p_perf.balls_faced
-            tp.wickets_taken += p_perf.wickets_taken
-            tp.runs_conceded += p_perf.runs_conceded
-            tp.performance_score += perf_score
+            tp.runs_scored = (tp.runs_scored or 0) + p_perf.runs_scored
+            tp.balls_faced = (tp.balls_faced or 0) + p_perf.balls_faced
+            tp.wickets_taken = (tp.wickets_taken or 0) + p_perf.wickets_taken
+            tp.runs_conceded = (tp.runs_conceded or 0) + p_perf.runs_conceded
+            tp.fours = (tp.fours or 0) + p_perf.fours
+            tp.sixes = (tp.sixes or 0) + p_perf.sixes
+            tp.overs_bowled = (tp.overs_bowled or 0.0) + p_perf.overs_bowled
+            tp.performance_score = (tp.performance_score or 0) + perf_score
             db.add(tp)
             
     db.commit()

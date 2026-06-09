@@ -146,17 +146,37 @@ class ScoreUpdate(BaseModel):
     runs: int
     wickets: int
     overs: float
+    performances: List['PlayerPerformanceInput'] = []
+    wagon_wheel_data: Optional[str] = None
 
 class PlayerPerformanceInput(BaseModel):
     player_id: int
     runs_scored: int
     balls_faced: int
+    fours: int = 0
+    sixes: int = 0
     wickets_taken: int
     runs_conceded: int
+    overs_bowled: float = 0.0
 
 class MatchCompleteInput(BaseModel):
     winner_id: Optional[int] = None
     performances: List[PlayerPerformanceInput]
+    wagon_wheel_data: Optional[str] = None
+
+class MatchPerformanceOut(BaseModel):
+    id: int
+    player_id: int
+    runs_scored: int
+    balls_faced: int
+    fours: int
+    sixes: int
+    wickets_taken: int
+    runs_conceded: int
+    overs_bowled: float
+
+    class Config:
+        from_attributes = True
 
 class MatchOut(BaseModel):
     id: int
@@ -177,6 +197,8 @@ class MatchOut(BaseModel):
     team_b_overs: float
     winner_id: Optional[int] = None
     winner: Optional[TeamOut] = None
+    wagon_wheel_data: Optional[str] = None
+    performances: List[MatchPerformanceOut] = []
 
     class Config:
         from_attributes = True
